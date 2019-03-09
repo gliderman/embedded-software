@@ -24,22 +24,12 @@ void ADC_Init(void) {
 	start = 0;
 	end = 0;
 	full = 0;
-	hal_ADC_Init(void);
-}
-
-void ADC_AddChannel(uint8_t channel; uint16_t period, void(*callback)(uint16_t, void *), void * ptr) {
-	if(num_channels < ADC_MAX_CHANNELS) {
-		channels[num_channels].channel = channel
-		channels[num_channels].callback = callback;
-		channels[num_channels].ptr = ptr;
-		Task_Schedule(QueueMeasurement, &channels[num_channels], period, period);
-		num_channels++;
-	}
+	hal_ADC_Init();
 }
 
 static void QueueMeasurement(struct adc_channel * channel) {
 	// add measurement to the queue
-	if(!full) {
+	if (!full) {
 		BlockInterrupts();
 		// if empty then start the ADC conversion
 		if(start == end) {
@@ -52,16 +42,13 @@ static void QueueMeasurement(struct adc_channel * channel) {
 	}
 }
 
-// must be interrupt safe
-void ADC_ProcessMeasurementFromISR(uint16_t value) {
-	pending_measurements[start]->value = value;
-	Task_Queue(CallCallback, pending_measurements[start]);
-	full = 0;
-	start++;
-	if(start >= ADC_QUEUE_SIZE) start = 0;
-	// if not empty then start the next conversion
-	if(start != end) {
-		hal_ADC_StartChannel(pending_measurements[start]->channel);
+void ADC_AddChannel(uint8_t channel, uint16_t period, void(*callback)(uint16_t, void *), void * ptr) {
+	if(num_channels < ADC_MAX_CHANNELS) {
+		channels[num_channels].channel = channel;
+		channels[num_channels].callback = callback;
+		channels[num_channels].ptr = ptr;
+		Task_Schedule((task_t) &QueueMeasurement, &channels[num_channels], period, period);
+		num_channels++;
 	}
 }
 
@@ -70,6 +57,19 @@ static void CallCallback(struct adc_channel * channel_struct) {
 	if(channel_struct->ptr) {
 		channel_struct->callback(channel_struct->value, channel_struct->ptr);
 	}else {
-		channel_struct->callback(channel_struct->value);
+		channel_struct->callback(channel_struct->value, 0);
+	}
+}
+
+// must be interrupt safe
+void ADC_ProcessMeasurementFromISR(uint16_t value) {
+	pending_measurements[start]->value = value;
+	Task_Queue((task_t) &CallCallback, pending_measurements[start]);
+	full = 0;
+	start++;
+	if(start >= ADC_QUEUE_SIZE) start = 0;
+	// if not empty then start the next conversion
+	if(start != end) {
+		hal_ADC_StartChannel(pending_measurements[start]->channel);
 	}
 }
